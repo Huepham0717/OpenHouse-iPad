@@ -12,6 +12,18 @@ struct DoneView: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            if state.isSubmittingUser {
+                Label("Submitting to server…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline)
+            } else if let u = state.lastCreatedUser {
+                Label("Synced as #\(u.id) • \(u.first_name) \(u.last_name)", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                    .font(.subheadline)
+            } else if let err = state.lastAPIError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.subheadline)
+            }
             Text("You're All Set").font(.largeTitle).bold()
             Text("Thanks for signing in. A copy can be printed or saved as PDF.")
                 .foregroundStyle(.secondary)

@@ -9,7 +9,7 @@ import SwiftUI
 import PDFKit
 
 final class AppState: ObservableObject {
-    enum Route { case disclosure, info, signature, done }
+    enum Route { case disclosure, info, signature, done, login, crm }
 
     // Navigation & Data
     @Published var route: Route = .disclosure
@@ -25,7 +25,14 @@ final class AppState: ObservableObject {
     // Persistence keys
     private let visitorsKey = "openhouse.visitors"
     private let settingsKey = "openhouse.settings"
+    
+    @Published var lastCreatedUser: UserResponseDTO? = nil
+    @Published var lastAPIError: String? = nil
+    @Published var isSubmittingUser: Bool = false
 
+    // Auth state
+    @Published var isAuthenticated = false
+    @Published var authUsername: String = ""
     init() { load() }
 
     // MARK: Persistence
@@ -50,7 +57,48 @@ final class AppState: ObservableObject {
     }
 
     // MARK: Flow helpers
-    func resetCurrent() { currentVisitor = Visitor() }
+    func resetCurrent() {
+        currentVisitor = Visitor()
+        lastCreatedUser = nil
+        lastAPIError = nil
+        isSubmittingUser = false
+    }
+    
+    @MainActor
+    func submitCurrentVisitorToBackend() async {
+        isSubmittingUser = true
+        defer { isSubmittingUser = false }
+        lastCreatedUser = nil
+        lastAPIError = nil
+
+        // Require minimal info
+        guard !currentVisitor.fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !currentVisitor.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            lastAPIError = "Missing name or email"
+            return
+        }
+
+        // Split full name into first/last naively
+        let parts = currentVisitor.fullName.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let first = parts.first.map(String.init) ?? currentVisitor.fullName
+        let last = parts.count > 1 ? String(parts[1]) : ""
+
+        let payload = UserCreate(
+            first_name: first,
+            last_name: last,
+            email: currentVisitor.email,
+            phone: currentVisitor.phone,
+            note: agentSettings.propertyAddress,
+            lead_source: "Open House"
+        )
+        do {
+            let created = try await UsersAPI.shared.createUser(payload)
+            lastCreatedUser = created
+        } catch {
+            lastAPIError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
 
     func completeSignature(with image: UIImage) {
         currentVisitor.signatureImagePNGData = image.pngData()
@@ -58,6 +106,7 @@ final class AppState: ObservableObject {
         visitors.append(currentVisitor)
         save()
         route = .done
+        Task { await submitCurrentVisitorToBackend() }
     }
 
     // MARK: Exports
